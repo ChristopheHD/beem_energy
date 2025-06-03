@@ -1,0 +1,13 @@
+{
+  "domain": "beem_energy",
+  "name": "Beem Energy",
+  "version": "0.1.0",
+  "documentation": "https://github.com/ChristopheHD/beem_energy",
+  "requirements": [
+    "paho-mqtt",
+    "requests",
+    "pyjwt"
+  ],
+  "codeowners": ["@ChristopheHD"],
+  "iot_class": "cloud_push"
+}
