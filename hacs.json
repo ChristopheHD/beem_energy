@@ -1,0 +1,7 @@
+{
+  "name": "Beem Energy",
+  "content_in_root": false,
+  "country": "FR",
+  "domain": "beem_energy",
+  "homeassistant": "2022.0.0"
+}
