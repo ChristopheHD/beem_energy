@@ -10,5 +10,6 @@
     "pyjwt"
   ],
   "codeowners": ["@ChristopheHD"],
-  "iot_class": "cloud_push"
+  "iot_class": "cloud_push",
+  "integration_type": "hub"
 }
