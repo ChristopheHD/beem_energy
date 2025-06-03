@@ -70,6 +70,16 @@ class BeemEnergyMqttSensor(Entity):
         self._key = key
         self._state = None
 
+        # Ajout automatique des classes pour les sensors de puissance
+        if name.lower().endswith("power") or key.lower().endswith("power"):
+            self._attr_device_class = SensorDeviceClass.POWER
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_unit_of_measurement = "W"
+        if name.lower().endswith("soc") or key.lower().endswith("soc"):
+            self._attr_device_class = SensorDeviceClass.BATTERY
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            self._attr_unit_of_measurement = "%"
+
     @property
     def state(self):
         return self._state
