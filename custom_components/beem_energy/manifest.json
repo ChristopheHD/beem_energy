@@ -3,6 +3,7 @@
   "name": "Beem Energy",
   "version": "0.1.0",
   "documentation": "https://github.com/ChristopheHD/beem_energy",
+  "config_flow": true,
   "requirements": [
     "paho-mqtt",
     "requests",
