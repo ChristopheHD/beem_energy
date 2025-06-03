@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 from homeassistant.helpers.entity import Entity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.components.sensor import SensorDeviceClass
 
 from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, DEFAULT_NAME
 
