@@ -137,7 +137,9 @@ class BeemEnergyMqttSensor(Entity):
         return attrs
 
 def start_mqtt_and_update_sensors(battery_sensors, email, password, stop_event):
-    client_id, token_mqtt, batteries = get_beem_tokens_and_batteries(email, password)
+    client_id, token_mqtt, batteries = await hass.async_add_executor_job(
+        _get_beem_tokens_and_batteries, email, password
+    )
     if not all([client_id, token_mqtt]) or not batteries:
         _LOGGER.error("Could not retrieve necessary Beem Energy tokens or batteries.")
         return
