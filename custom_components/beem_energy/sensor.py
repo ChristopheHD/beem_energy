@@ -16,7 +16,7 @@ from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, DEFAULT_NAME
 
 _LOGGER = logging.getLogger(__name__)
 
-SENSOR_KEYS = [
+BATTERY_SENSOR_KEYS = [
     "solar_power",
     "inverter_power",
     "battery_power",
@@ -89,13 +89,10 @@ def _get_beem_tokens_and_batteries(email, password):
     return client_id, token_mqtt, batteries
 
 class BeemEnergyMqttSensor(Entity):
-    def __init__(self, name, key, serial_number, firmware_version, battery_data, device_id):
+    def __init__(self, name, key, battery_data):
         self._attr_name = name
         self._key = key
         self._state = None
-        self._serial_number = serial_number
-        self._firmware_version = firmware_version
-        self._device_id = device_id
         self._battery_data = battery_data
 
         # Classes and units
@@ -121,29 +118,22 @@ class BeemEnergyMqttSensor(Entity):
         return self._state is not None
 
     @property
-    def device_info(self):
-        # Attach entity to the battery device
-        info = {
-            "identifiers": {(DOMAIN, self._serial_number)},
-            "name": f"Beem Battery {self._serial_number}",
-            "manufacturer": "Beem Energy",
-            "model": f"Beem Battery ({self._firmware_version})",
-            "sw_version": self._firmware_version,
-        }
-        # Add location if exists
-        if self._battery_data.get("location"):
-            info["suggested_area"] = self._battery_data["location"]
-        return info
+    def device_info(self) -> DeviceInfo:
+        """Return the device info."""
+        return DeviceInfo( identifiers={(DOMAIN, self._battery_data.get("serialNumber"))},
+            name="Beem Battery {self._device_id}",
+            manufacturer="Beem Energy",
+            sw_version=self._battery_data.get("firmwareVersion"),
+            suggested_area=self._battery_data.get("location"),
+            serial_number=self._battery_data.get("serialNumber")
+        )
 
     @property
     def extra_state_attributes(self):
         # Diagnostic and battery info
         attrs = {}
-        attrs["serial_number"] = self._serial_number
-        attrs["firmware_version"] = self._firmware_version
         attrs["created_at"] = self._battery_data.get("createdAt")
         attrs["warranty_status"] = self._battery_data.get("warrantyStatus")
-        attrs["location"] = self._battery_data.get("location")
         attrs["declared_number_of_modules"] = self._battery_data.get("declaredNumberOfModules")
         attrs["number_of_mppts"] = self._battery_data.get("numberOfMppts")
         attrs["user_access_mode"] = self._battery_data.get("userAccessMode")
@@ -153,7 +143,6 @@ class BeemEnergyMqttSensor(Entity):
         attrs["is_streaming_raw_grid_power"] = self._battery_data.get("isStreamingRawGridPower")
         attrs["use_ac_coupling"] = self._battery_data.get("useAcCoupling")
         attrs["live_data_smoothing_params"] = self._battery_data.get("liveDataSmoothingParams")
-        attrs["battery_id"] = self._battery_data.get("id")
         # Add any additional fields as needed
         return attrs
 
@@ -177,12 +166,14 @@ def start_mqtt_and_update_sensors(battery_sensors, email, password, stop_event):
             def on_message(client, userdata, msg):
                 try:
                     payload = json.loads(msg.payload)
+                    _LOGGER.info("MQTT message received for topic %s: %s", msg.topic, payload)
                     for sensor in sensors:
+                        old = sensor.state
                         sensor.update_from_payload(payload)
+                        _LOGGER.info("Updating sensor %s: %s -> %s", sensor._attr_name, old, sensor.state)
                         sensor.schedule_update_ha_state()
-                    _LOGGER.debug("Received Beem MQTT payload for battery %s: %s", serial_number, payload)
                 except Exception as e:
-                    _LOGGER.error("Error parsing Beem MQTT message for battery %s: %s", serial_number, e)
+                    _LOGGER.error("Error parsing Beem MQTT message: %s", e)
             return on_message
 
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id, transport="websockets", protocol=mqtt.MQTTv5)
@@ -211,34 +202,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     email = entry.data.get(CONF_EMAIL)
     password = entry.data.get(CONF_PASSWORD)
     stop_event = threading.Event()
-    # Get all batteries (call sync code in executor)
+
+    # Appel synchrone pour récupérer les batteries
     client_id, token_mqtt, batteries = await hass.async_add_executor_job(
         _get_beem_tokens_and_batteries, email, password
     )
     if not batteries:
         _LOGGER.error("No batteries found for the Beem Energy account.")
         return
+
     battery_sensors = {}
     entities = []
+
     for battery in batteries:
-        serial_number = battery["serialNumber"]
-        firmware_version = battery.get("firmwareVersion", "unknown")
         device_id = battery.get("id")
         sensors = []
-        for key in SENSOR_KEYS:
-            sensor_name = f"Beem {serial_number} {key.replace('_', ' ').title()}"
+        for key in BATTERY_SENSOR_KEYS:
+            sensor_name = f"Beem Battery {battery.get("id")} {key.replace('_', ' ').title()}"
             sensor = BeemEnergyMqttSensor(
                 name=sensor_name,
                 key=key,
-                serial_number=serial_number,
-                firmware_version=firmware_version,
-                battery_data=battery,
-                device_id=device_id,
+                battery_data=battery
             )
             sensors.append(sensor)
             entities.append(sensor)
         battery_sensors[serial_number] = sensors
-    # Store batteries for diagnostics
+
+    # Stocke les batteries pour diagnostics
     hass.data.setdefault(DOMAIN, {})["batteries"] = batteries
+
+    # Ajoute toutes les entités en une fois (regroupement correct)
     async_add_entities(entities, True)
-    threading.Thread(target=start_mqtt_and_update_sensors, args=(battery_sensors, email, password, stop_event), daemon=True).start()
+
+    # Lance le thread MQTT
+    threading.Thread(
+        target=start_mqtt_and_update_sensors,
+        args=(battery_sensors, email, password, stop_event),
+        daemon=True
+    ).start()
