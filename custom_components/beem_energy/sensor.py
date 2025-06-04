@@ -221,5 +221,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             entities.append(sensor)
         battery_sensors[serial_number] = sensors
 
+    # Store batteries for diagnostics
+    hass.data.setdefault(DOMAIN, {})["batteries"] = batteries
+    
     async_add_entities(entities, True)
     threading.Thread(target=start_mqtt_and_update_sensors, args=(battery_sensors, email, password, stop_event), daemon=True).start()
