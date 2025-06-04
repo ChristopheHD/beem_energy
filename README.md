@@ -2,6 +2,12 @@
 
 Custom integration to fetch and stream energy data from [Beem Energy](https://beem.energy) using their REST and MQTT APIs.
 
+## ⚠️ Project Status: In Development
+
+**This integration is currently under active development and is not fully functional yet.**  
+Features may be incomplete or unstable, and breaking changes can occur at any time.  
+We recommend waiting for a stable release before using this integration in a production environment.
+
 ## Features
 
 - Live energy data streaming using MQTT.
