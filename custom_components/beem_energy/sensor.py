@@ -28,43 +28,64 @@ SENSOR_KEYS = [
 ]
 
 def _get_beem_tokens_and_batteries(email, password):
-    """Synchronously authenticate & fetch batteries list from Beem Energy."""
     import requests
     import time
-    # REST Auth
-    response = requests.post(
-        "https://api-x.beem.energy/beemapp/user/login",
-        data={"email": email, "password": password},
-        timeout=10,
-    )
-    if response.status_code != 201:
-        return None, None, []
-    data = response.json()
-    token_rest = data.get("accessToken")
-    user_id = data.get("userId")
-    client_id = f"beemapp-{user_id}-{round(time.time() * 1000)}"
+    import logging
 
-    # MQTT token
-    response = requests.post(
-        "https://api-x.beem.energy/beemapp/devices/mqtt/token",
-        headers={"Authorization": f"Bearer {token_rest}"},
-        data={"clientId": client_id, "clientType": "user"},
-        timeout=10,
-    )
-    if response.status_code != 200:
-        return None, None, []
-    token_mqtt = response.json().get("jwt")
+    _LOGGER = logging.getLogger(__name__)
+    _LOGGER.debug("Starting authentication with Beem Energy for email: %s", email)
 
-    # Batteries list
-    response = requests.get(
-        "https://api-x.beem.energy/beemapp/devices",
-        headers={"Authorization": f"Bearer {token_rest}"},
-        data={"clientId": client_id, "clientType": "user"},
-        timeout=10,
-    )
-    if response.status_code != 200:
+    try:
+        response = requests.post(
+            "https://api-x.beem.energy/beemapp/user/login",
+            data={"email": email, "password": password},
+            timeout=10,
+        )
+        _LOGGER.debug("Login response status: %s, body: %s", response.status_code, response.text)
+        if response.status_code != 201:
+            _LOGGER.error("Failed to get REST token: %s, response: %s", response.status_code, response.text)
+            return None, None, []
+        data = response.json()
+        token_rest = data.get("accessToken")
+        user_id = data.get("userId")
+        client_id = f"beemapp-{user_id}-{round(time.time() * 1000)}"
+    except Exception as e:
+        _LOGGER.exception("Exception during login request: %s", e)
         return None, None, []
-    batteries = response.json().get("batteries", [])
+
+    try:
+        response = requests.post(
+            "https://api-x.beem.energy/beemapp/devices/mqtt/token",
+            headers={"Authorization": f"Bearer {token_rest}"},
+            data={"clientId": client_id, "clientType": "user"},
+            timeout=10,
+        )
+        _LOGGER.debug("MQTT token response status: %s, body: %s", response.status_code, response.text)
+        if response.status_code != 200:
+            _LOGGER.error("Failed to get MQTT token: %s, response: %s", response.status_code, response.text)
+            return None, None, []
+        token_mqtt = response.json().get("jwt")
+    except Exception as e:
+        _LOGGER.exception("Exception during MQTT token request: %s", e)
+        return None, None, []
+
+    try:
+        response = requests.get(
+            "https://api-x.beem.energy/beemapp/devices",
+            headers={"Authorization": f"Bearer {token_rest}"},
+            data={"clientId": client_id, "clientType": "user"},
+            timeout=10,
+        )
+        _LOGGER.debug("Devices response status: %s, body: %s", response.status_code, response.text)
+        if response.status_code != 200:
+            _LOGGER.error("Failed to get devices list: %s, response: %s", response.status_code, response.text)
+            return None, None, []
+        batteries = response.json().get("batteries", [])
+        _LOGGER.info("Fetched %d batteries from Beem Energy.", len(batteries))
+    except Exception as e:
+        _LOGGER.exception("Exception during devices request: %s", e)
+        return None, None, []
+
     return client_id, token_mqtt, batteries
 
 class BeemEnergyMqttSensor(Entity):
