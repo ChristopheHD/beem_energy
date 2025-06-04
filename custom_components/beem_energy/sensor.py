@@ -28,22 +28,23 @@ SENSOR_KEYS = [
 ]
 
 def _get_beem_tokens_and_batteries(email, password):
-    # Authenticate via REST API
+    """Synchronously authenticate & fetch batteries list from Beem Energy."""
+    import requests
+    import time
+    # REST Auth
     response = requests.post(
         "https://api-x.beem.energy/beemapp/user/login",
         data={"email": email, "password": password},
         timeout=10,
     )
     if response.status_code != 201:
-        _LOGGER.error("Failed to get REST token: %s", response.status_code)
         return None, None, []
-
     data = response.json()
     token_rest = data.get("accessToken")
     user_id = data.get("userId")
     client_id = f"beemapp-{user_id}-{round(time.time() * 1000)}"
 
-    # Get MQTT token
+    # MQTT token
     response = requests.post(
         "https://api-x.beem.energy/beemapp/devices/mqtt/token",
         headers={"Authorization": f"Bearer {token_rest}"},
@@ -51,12 +52,10 @@ def _get_beem_tokens_and_batteries(email, password):
         timeout=10,
     )
     if response.status_code != 200:
-        _LOGGER.error("Failed to get MQTT token: %s", response.status_code)
         return None, None, []
-
     token_mqtt = response.json().get("jwt")
 
-    # Get all batteries
+    # Batteries list
     response = requests.get(
         "https://api-x.beem.energy/beemapp/devices",
         headers={"Authorization": f"Bearer {token_rest}"},
@@ -64,9 +63,7 @@ def _get_beem_tokens_and_batteries(email, password):
         timeout=10,
     )
     if response.status_code != 200:
-        _LOGGER.error("Failed to get devices list: %s", response.status_code)
         return None, None, []
-
     batteries = response.json().get("batteries", [])
     return client_id, token_mqtt, batteries
 
@@ -193,15 +190,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     email = entry.data.get(CONF_EMAIL)
     password = entry.data.get(CONF_PASSWORD)
     stop_event = threading.Event()
-
-    # Appel bloquant déplacé hors event loop
+    # Get all batteries (call sync code in executor)
     client_id, token_mqtt, batteries = await hass.async_add_executor_job(
         _get_beem_tokens_and_batteries, email, password
     )
     if not batteries:
         _LOGGER.error("No batteries found for the Beem Energy account.")
         return
-
     battery_sensors = {}
     entities = []
     for battery in batteries:
@@ -217,14 +212,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 serial_number=serial_number,
                 firmware_version=firmware_version,
                 battery_data=battery,
-                device_id=device_id
+                device_id=device_id,
             )
             sensors.append(sensor)
             entities.append(sensor)
         battery_sensors[serial_number] = sensors
-
     # Store batteries for diagnostics
     hass.data.setdefault(DOMAIN, {})["batteries"] = batteries
-    
     async_add_entities(entities, True)
     threading.Thread(target=start_mqtt_and_update_sensors, args=(battery_sensors, email, password, stop_event), daemon=True).start()
