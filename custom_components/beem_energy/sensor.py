@@ -27,7 +27,7 @@ SENSOR_KEYS = [
     "mppt3_power",
 ]
 
-def get_beem_tokens_and_batteries(email, password):
+def _get_beem_tokens_and_batteries(email, password):
     # Authenticate via REST API
     response = requests.post(
         "https://api-x.beem.energy/beemapp/user/login",
@@ -194,8 +194,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     password = entry.data.get(CONF_PASSWORD)
     stop_event = threading.Event()
 
-    # Get all batteries
-    client_id, token_mqtt, batteries = get_beem_tokens_and_batteries(email, password)
+    # Appel bloquant déplacé hors event loop
+    client_id, token_mqtt, batteries = await hass.async_add_executor_job(
+        _get_beem_tokens_and_batteries, email, password
+    )
     if not batteries:
         _LOGGER.error("No batteries found for the Beem Energy account.")
         return
