@@ -146,7 +146,7 @@ class BeemEnergyMqttSensor(Entity):
         # Add any additional fields as needed
         return attrs
 
-def start_mqtt_and_update_sensors(batteries, client_id, token_mqtt, stop_event):
+def start_mqtt_and_update_sensors(batteries, battery_sensors, client_id, token_mqtt, stop_event):
     
     mqtt_server = "mqtt.beem.energy"
     mqtt_port = 8084
@@ -233,6 +233,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Lance le thread MQTT
     threading.Thread(
         target=start_mqtt_and_update_sensors,
-        args=(battery_sensors, client_id, token_mqtt, stop_event),
+        args=(batteries, battery_sensors, client_id, token_mqtt, stop_event),
         daemon=True
     ).start()
