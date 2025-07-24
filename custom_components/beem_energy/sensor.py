@@ -146,12 +146,8 @@ class BeemEnergyMqttSensor(Entity):
         # Add any additional fields as needed
         return attrs
 
-def start_mqtt_and_update_sensors(battery_sensors, email, password, stop_event):
-    client_id, token_mqtt, batteries = _get_beem_tokens_and_batteries(email, password)
-    if not all([client_id, token_mqtt]) or not batteries:
-        _LOGGER.error("Could not retrieve necessary Beem Energy tokens or batteries.")
-        return
-
+def start_mqtt_and_update_sensors(batteries, client_id, token_mqtt, stop_event):
+    
     mqtt_server = "mqtt.beem.energy"
     mqtt_port = 8084
 
@@ -207,8 +203,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     client_id, token_mqtt, batteries = await hass.async_add_executor_job(
         _get_beem_tokens_and_batteries, email, password
     )
-    if not batteries:
-        _LOGGER.error("No batteries found for the Beem Energy account.")
+    if not all([client_id, token_mqtt]) or not batteries:
+        _LOGGER.error("Could not retrieve necessary Beem Energy tokens or batteries.")
         return
 
     battery_sensors = {}
@@ -226,7 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             )
             sensors.append(sensor)
             entities.append(sensor)
-        battery_sensors[serial_number] = sensors
+        battery_sensors[battery["serialNumber"]] = sensors
 
     # Stocke les batteries pour diagnostics
     hass.data.setdefault(DOMAIN, {})["batteries"] = batteries
@@ -237,6 +233,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Lance le thread MQTT
     threading.Thread(
         target=start_mqtt_and_update_sensors,
-        args=(battery_sensors, email, password, stop_event),
+        args=(battery_sensors, client_id, token_mqtt, stop_event),
         daemon=True
     ).start()
