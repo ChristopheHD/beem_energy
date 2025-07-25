@@ -50,6 +50,5 @@ def _battery_diag(battery):
         "is_streaming_raw_grid_power": battery.get("isStreamingRawGridPower"),
         "use_ac_coupling": battery.get("useAcCoupling"),
         "live_data_smoothing_params": battery.get("liveDataSmoothingParams"),
-        "battery_id": battery.get("id"),
-        # Ajoute ici d'autres champs pertinents si besoin
+        "battery_id": battery.get("id")
     }

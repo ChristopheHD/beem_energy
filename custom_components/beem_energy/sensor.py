@@ -1,12 +1,11 @@
 import logging
 import requests
 import json
-import threading
 import time
 import paho.mqtt.client as mqtt
 
-from homeassistant.helpers.entity import Entity, DeviceInfo
-from homeassistant.helpers.device_registry import async_get as async_get_device_registry
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -28,11 +27,8 @@ BATTERY_SENSOR_KEYS = [
 ]
 
 def _get_beem_tokens_and_batteries(email, password):
-    import requests
-    import time
-    import logging
+    """Authenticate with Beem Energy and retrieve tokens and batteries data."""
 
-    _LOGGER = logging.getLogger(__name__)
     _LOGGER.debug("Starting authentication with Beem Energy for email: %s", email)
 
     try:
@@ -89,11 +85,14 @@ def _get_beem_tokens_and_batteries(email, password):
     return client_id, token_mqtt, batteries
 
 class BeemEnergyMqttSensor(Entity):
-    def __init__(self, name, key, battery_data):
+    """Representation of a Beem Energy MQTT sensor."""
+
+    def __init__(self, name, key, battery):
+        """Initialize the sensor."""
         self._attr_name = name
         self._key = key
-        self._state = None
-        self._battery_data = battery_data
+        self._attr_state = None
+        self._attr_device_info = battery
 
         # Classes and units
         if key.lower().endswith("power"):
@@ -105,99 +104,67 @@ class BeemEnergyMqttSensor(Entity):
             self._attr_state_class = SensorStateClass.MEASUREMENT
             self._attr_unit_of_measurement = "%"
 
-    @property
-    def state(self):
-        return self._state
+        self._attr_available = False
 
     def update_from_payload(self, payload):
         if self._key in payload:
-            self._state = payload[self._key]
+            self._attr_state = payload[self._key]
+            self._attr_available = True
+        else:
+            self._attr_available = False
+        _LOGGER.debug("Updated sensor %s: %s", self._attr_name, self._attr_state)
 
-    @property
-    def available(self):
-        return self._state is not None
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return the device info."""
-        return DeviceInfo( identifiers={(DOMAIN, self._battery_data.get("serialNumber"))},
-            name="Beem Battery {self._device_id}",
-            manufacturer="Beem Energy",
-            sw_version=self._battery_data.get("firmwareVersion"),
-            suggested_area=self._battery_data.get("location"),
-            serial_number=self._battery_data.get("serialNumber")
-        )
-
-    @property
-    def extra_state_attributes(self):
-        # Diagnostic and battery info
-        attrs = {}
-        attrs["created_at"] = self._battery_data.get("createdAt")
-        attrs["warranty_status"] = self._battery_data.get("warrantyStatus")
-        attrs["declared_number_of_modules"] = self._battery_data.get("declaredNumberOfModules")
-        attrs["number_of_mppts"] = self._battery_data.get("numberOfMppts")
-        attrs["user_access_mode"] = self._battery_data.get("userAccessMode")
-        attrs["house_id"] = self._battery_data.get("houseId")
-        attrs["is_installation_status"] = self._battery_data.get("isInstallationStatus")
-        attrs["reversed_ct"] = self._battery_data.get("reversedCt")
-        attrs["is_streaming_raw_grid_power"] = self._battery_data.get("isStreamingRawGridPower")
-        attrs["use_ac_coupling"] = self._battery_data.get("useAcCoupling")
-        attrs["live_data_smoothing_params"] = self._battery_data.get("liveDataSmoothingParams")
-        # Add any additional fields as needed
-        return attrs
-
-def start_mqtt_and_update_sensors(batteries, battery_sensors, client_id, token_mqtt, stop_event):
+def start_mqtt(batteries, battery_sensors, client_id, token_mqtt):
     
     mqtt_server = "mqtt.beem.energy"
     mqtt_port = 8084
 
     # For each battery, subscribe to its topic
-    mqtt_clients = []
     for battery in batteries:
         serial_number = battery["serialNumber"]
         topic = f"battery/{serial_number}/sys/streaming"
         sensors = battery_sensors[serial_number]
 
-        def make_on_message(sensors):
-            def on_message(client, userdata, msg):
-                try:
-                    payload = json.loads(msg.payload)
-                    _LOGGER.info("MQTT message received for topic %s: %s", msg.topic, payload)
-                    for sensor in sensors:
-                        old = sensor.state
-                        sensor.update_from_payload(payload)
-                        _LOGGER.info("Updating sensor %s: %s -> %s", sensor._attr_name, old, sensor.state)
-                        sensor.schedule_update_ha_state()
-                except Exception as e:
-                    _LOGGER.error("Error parsing Beem MQTT message: %s", e)
-            return on_message
-
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id, transport="websockets", protocol=mqtt.MQTTv5)
         client.username_pw_set(username=client_id, password=token_mqtt)
         client.tls_set()
-        client.on_connect = lambda client, userdata, flags, rc, prop=None: (
-            _LOGGER.info("Connected to Beem MQTT (battery %s) with result code %s", serial_number, rc),
-            client.subscribe(topic)
-        )
-        client.on_message = make_on_message(sensors)
+        client.on_connect = on_mqtt_connect
+        client.on_message = on_mqtt_message
+        client.user_data_set(battery_sensors)
 
-        def run(client=client):
-            try:
-                client.connect(mqtt_server, mqtt_port, 60)
-                client.loop_start()
-                while not stop_event.is_set():
-                    time.sleep(1)
-                client.loop_stop()
-            except Exception as e:
-                _LOGGER.error("MQTT thread error for battery %s: %s", serial_number, e)
+        try:
+            client.connect_async(mqtt_server, mqtt_port, 60)
+            client.loop_start()
+        except Exception as e:
+            _LOGGER.error("MQTT thread error for battery %s: %s", serial_number, e)
 
-        threading.Thread(target=run, daemon=True).start()
-        mqtt_clients.append(client)
+
+def on_mqtt_connect(client, userdata, flags, rc):
+    """Handle MQTT connection."""
+    _LOGGER.info("Connected to Beem MQTT with result code %s", rc)
+    for serial_number, sensors in userdata.items():
+        topic = f"battery/{serial_number}/sys/streaming"
+        client.subscribe(topic)
+        _LOGGER.debug("Subscribed to topic %s for battery %s", topic, serial_number)
+
+def on_mqtt_message(client, userdata, msg):
+    """Handle incoming MQTT messages."""
+    try:
+        payload = json.loads(msg.payload)
+        _LOGGER.info("MQTT message received for topic %s: %s", msg.topic, payload)
+        serial_number = msg.topic.split("/")[1]
+        sensors = userdata.get(serial_number, [])
+        for sensor in sensors:
+            old = sensor.state
+            sensor.update_from_payload(payload)
+            _LOGGER.info("Updating sensor %s: %s -> %s", sensor._attr_name, old, sensor.state)
+            sensor.schedule_update_ha_state()
+    except Exception as e:
+        _LOGGER.error("Error processing MQTT message: %s", e)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     email = entry.data.get(CONF_EMAIL)
     password = entry.data.get(CONF_PASSWORD)
-    stop_event = threading.Event()
 
     # Appel synchrone pour récupérer les batteries
     client_id, token_mqtt, batteries = await hass.async_add_executor_job(
@@ -211,14 +178,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities = []
 
     for battery in batteries:
-        device_id = battery.get("id")
+        device = DeviceInfo(
+            identifiers={(DOMAIN, battery["serialNumber"])},
+            name=f"Beem Battery {battery["id"]}",
+            manufacturer="Beem Energy",
+            sw_version=battery["firmwareVersion"],
+            configuration_url="https://beem.energy",
+            suggested_area=battery["location"],
+        )
         sensors = []
         for key in BATTERY_SENSOR_KEYS:
             sensor_name = f"Beem Battery {battery.get("id")} {key.replace('_', ' ').title()}"
             sensor = BeemEnergyMqttSensor(
                 name=sensor_name,
                 key=key,
-                battery_data=battery
+                battery=device
             )
             sensors.append(sensor)
             entities.append(sensor)
@@ -230,9 +204,4 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Ajoute toutes les entités en une fois (regroupement correct)
     async_add_entities(entities, True)
 
-    # Lance le thread MQTT
-    threading.Thread(
-        target=start_mqtt_and_update_sensors,
-        args=(batteries, battery_sensors, client_id, token_mqtt, stop_event),
-        daemon=True
-    ).start()
+    start_mqtt(batteries, battery_sensors, client_id, token_mqtt)
