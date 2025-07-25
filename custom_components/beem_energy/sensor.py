@@ -4,7 +4,7 @@ import json
 import time
 import asyncio
 import ssl
-from asyncio_mqtt import Client as AsyncMqttClient, MqttError
+from aiomqtt import Client as AsyncMqttClient, MqttError
 
 
 from homeassistant.helpers.entity import Entity
@@ -17,6 +17,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, DEFAULT_NAME
 
 _LOGGER = logging.getLogger(__name__)
+ssl_context = ssl.create_default_context()
 
 BATTERY_SENSOR_KEYS = [
     "solar_power",
@@ -121,8 +122,6 @@ async def start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt):
     mqtt_server = "mqtt.beem.energy"
     mqtt_port = 8084
 
-    ssl_context = ssl.create_default_context()
-
     async def handle_battery(serial_number, sensors):
         topic = f"battery/{serial_number}/sys/streaming"
         async with AsyncMqttClient(
@@ -134,16 +133,15 @@ async def start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt):
             transport="websockets"
         ) as client:
             await client.subscribe(topic)
-            async with client.unfiltered_messages() as messages:
-                async for msg in messages:
-                    try:
-                        payload = json.loads(msg.payload.decode())
-                        for sensor in sensors:
-                            old = sensor.state
-                            sensor.update_from_payload(payload)
-                            sensor.schedule_update_ha_state()
-                    except Exception as e:
-                        _LOGGER.error("Error processing MQTT message: %s", e)
+            async for message in client.messages:
+                try:
+                    payload = json.loads(message.payload)
+                    for sensor in sensors:
+                        old = sensor.state
+                        sensor.update_from_payload(payload)
+                        sensor.schedule_update_ha_state()
+                except Exception as e:
+                    _LOGGER.error("Error processing MQTT message: %s", e)
 
     tasks = [
         asyncio.create_task(handle_battery(battery["serialNumber"], battery_sensors[battery["serialNumber"]]))
