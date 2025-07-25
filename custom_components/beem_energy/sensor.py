@@ -4,17 +4,17 @@ import json
 import time
 import asyncio
 import ssl
-from aiomqtt import Client as AsyncMqttClient, MqttError, ProtocolVersion
+from aiomqtt import ProtocolVersion, Client as AsyncMqttClient
 
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
-from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, DEFAULT_NAME
+from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD
 
 _LOGGER = logging.getLogger(__name__)
 ssl_context = ssl.create_default_context()
