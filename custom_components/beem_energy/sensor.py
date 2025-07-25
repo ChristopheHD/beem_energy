@@ -130,7 +130,8 @@ async def start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt):
             username=client_id,
             password=token_mqtt,
             tls_context=ssl_context,
-            transport="websockets"
+            transport="websockets",
+            protocol=ProtocolVersion.V5
         ) as client:
             await client.subscribe(topic)
             async for message in client.messages:
