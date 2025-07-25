@@ -2,7 +2,10 @@ import logging
 import requests
 import json
 import time
-import paho.mqtt.client as mqtt
+import asyncio
+import ssl
+from asyncio_mqtt import Client as AsyncMqttClient, MqttError
+
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -114,32 +117,42 @@ class BeemEnergyMqttSensor(Entity):
             self._attr_available = False
         _LOGGER.debug("Updated sensor %s: %s", self._attr_name, self._attr_state)
 
-def start_mqtt(batteries, battery_sensors, client_id, token_mqtt):
-    
+async def start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt):
     mqtt_server = "mqtt.beem.energy"
     mqtt_port = 8084
 
-    # For each battery, subscribe to its topic
-    for battery in batteries:
-        serial_number = battery["serialNumber"]
+    ssl_context = ssl.create_default_context()
+
+    async def handle_battery(serial_number, sensors):
         topic = f"battery/{serial_number}/sys/streaming"
-        sensors = battery_sensors[serial_number]
+        async with AsyncMqttClient(
+            mqtt_server,
+            port=mqtt_port,
+            username=client_id,
+            password=token_mqtt,
+            tls_context=ssl_context,
+            transport="websockets"
+        ) as client:
+            await client.subscribe(topic)
+            async with client.unfiltered_messages() as messages:
+                async for msg in messages:
+                    try:
+                        payload = json.loads(msg.payload.decode())
+                        for sensor in sensors:
+                            old = sensor.state
+                            sensor.update_from_payload(payload)
+                            sensor.schedule_update_ha_state()
+                    except Exception as e:
+                        _LOGGER.error("Error processing MQTT message: %s", e)
 
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id, transport="websockets", protocol=mqtt.MQTTv5)
-        client.username_pw_set(username=client_id, password=token_mqtt)
-        client.tls_set()
-        client.on_connect = on_mqtt_connect
-        client.on_message = on_mqtt_message
-        client.user_data_set(battery_sensors)
-
-        try:
-            client.connect_async(mqtt_server, mqtt_port, 60)
-            client.loop_start()
-        except Exception as e:
-            _LOGGER.error("MQTT thread error for battery %s: %s", serial_number, e)
+    tasks = [
+        asyncio.create_task(handle_battery(battery["serialNumber"], battery_sensors[battery["serialNumber"]]))
+        for battery in batteries
+    ]
+    await asyncio.gather(*tasks)
 
 
-def on_mqtt_connect(client, userdata, flags, rc):
+def on_mqtt_connect(client, userdata, flags, rc, properties):
     """Handle MQTT connection."""
     _LOGGER.info("Connected to Beem MQTT with result code %s", rc)
     for serial_number, sensors in userdata.items():
@@ -201,7 +214,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Stocke les batteries pour diagnostics
     hass.data.setdefault(DOMAIN, {})["batteries"] = batteries
 
-    # Ajoute toutes les entités en une fois (regroupement correct)
+    # Ajoute toutes les entités en une fois
     async_add_entities(entities, True)
 
-    start_mqtt(batteries, battery_sensors, client_id, token_mqtt)
+    hass.loop.create_task(
+        start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt)
+    )
