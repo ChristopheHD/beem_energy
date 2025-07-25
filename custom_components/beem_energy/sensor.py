@@ -151,30 +151,6 @@ async def start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt):
     ]
     await asyncio.gather(*tasks)
 
-
-def on_mqtt_connect(client, userdata, flags, rc, properties):
-    """Handle MQTT connection."""
-    _LOGGER.info("Connected to Beem MQTT with result code %s", rc)
-    for serial_number, sensors in userdata.items():
-        topic = f"battery/{serial_number}/sys/streaming"
-        client.subscribe(topic)
-        _LOGGER.debug("Subscribed to topic %s for battery %s", topic, serial_number)
-
-def on_mqtt_message(client, userdata, msg):
-    """Handle incoming MQTT messages."""
-    try:
-        payload = json.loads(msg.payload)
-        _LOGGER.info("MQTT message received for topic %s: %s", msg.topic, payload)
-        serial_number = msg.topic.split("/")[1]
-        sensors = userdata.get(serial_number, [])
-        for sensor in sensors:
-            old = sensor.state
-            sensor.update_from_payload(payload)
-            _LOGGER.info("Updating sensor %s: %s -> %s", sensor._attr_name, old, sensor.state)
-            sensor.schedule_update_ha_state()
-    except Exception as e:
-        _LOGGER.error("Error processing MQTT message: %s", e)
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     email = entry.data.get(CONF_EMAIL)
     password = entry.data.get(CONF_PASSWORD)
