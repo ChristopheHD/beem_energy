@@ -135,15 +135,17 @@ async def start_mqtt_async(batteries, battery_sensors, client_id, token_mqtt):
             identifier=client_id
         ) as client:
             await client.subscribe(topic)
-            async for message in client.messages:
-                try:
-                    payload = json.loads(message.payload)
-                    for sensor in sensors:
-                        old = sensor.state
-                        sensor.update_from_payload(payload)
-                        sensor.schedule_update_ha_state()
-                except Exception as e:
-                    _LOGGER.error("Error processing MQTT message: %s", e)
+            async with client.unfiltered_messages() as messages:
+                async for message in messages:
+                    try:
+                        payload = json.loads(message.payload)
+                        _LOGGER.debug("MQTT message received for topic %s: %s", topic, payload)
+                        for sensor in sensors:
+                            old = sensor.state
+                            sensor.update_from_payload(payload)
+                            sensor.schedule_update_ha_state()
+                    except Exception as e:
+                        _LOGGER.error("Error processing MQTT message: %s", e)
 
     tasks = [
         asyncio.create_task(handle_battery(battery["serialNumber"], battery_sensors[battery["serialNumber"]]))
