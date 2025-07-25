@@ -4,7 +4,7 @@ import json
 import time
 import asyncio
 import ssl
-from aiomqtt import Client as AsyncMqttClient, MqttError
+from aiomqtt import Client as AsyncMqttClient, MqttError, ProtocolVersion
 
 
 from homeassistant.helpers.entity import Entity
